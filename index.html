@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Rest Starts Here</title>
+<meta name="viewport" content="width=1080">
+<style>
+  @font-face { font-family: "Fraunces"; font-weight: 300; font-style: normal; src: url(fonts/Fraunces-300-normal.woff2) format("woff2"); }
+  @font-face { font-family: "Fraunces"; font-weight: 300; font-style: italic; src: url(fonts/Fraunces-300-italic.woff2) format("woff2"); }
+  @font-face { font-family: "Nunito Sans"; font-weight: 300 400; src: url(fonts/NunitoSans-400-normal.woff2) format("woff2"); }
+
+  :root {
+    --night: #15121e;
+    --dusk: #231b2c;
+    --ember: #f2b27e;
+    --ember-soft: #e39a74;
+    --cream: #f5eadd;
+    --muted: #b8a898;
+  }
+  html, body { margin: 0; background: #000; }
+  #stage {
+    position: relative; width: 1080px; height: 1920px; overflow: hidden;
+    background: var(--night); color: var(--cream);
+    font-family: "Nunito Sans", sans-serif;
+  }
+  #stage > * { position: absolute; }
+  canvas { inset: 0; }
+
+  .line {
+    left: 0; right: 0; text-align: center;
+    font-family: "Fraunces", serif; font-weight: 300;
+    font-size: 84px; line-height: 1.18; letter-spacing: -0.01em;
+    opacity: 0; will-change: opacity, transform, filter;
+  }
+  .line em { font-style: italic; color: #f7d7b8; }
+
+  .ui { left: 0; right: 0; text-align: center; opacity: 0; }
+  .eyebrow {
+    font-size: 30px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--muted);
+  }
+  .clock { font-size: 44px; letter-spacing: 0.08em; font-weight: 300; font-variant-numeric: tabular-nums; }
+  .phase {
+    left: 0; right: 0; text-align: center; top: 922px;
+    font-family: "Fraunces", serif; font-style: italic; font-weight: 300; font-size: 64px;
+    color: var(--cream); opacity: 0;
+  }
+  .hint { font-size: 30px; color: var(--muted); letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<div id="stage" data-composition-id="rest-starts-here" data-width="1080" data-height="1920" data-start="0" data-duration="15">
+  <canvas id="bg" width="1080" height="1920"></canvas>
+  <canvas id="timer" width="1080" height="1920"></canvas>
+
+  <div class="line" id="l1" style="top:840px">Still awake<br><em>at 2 a.m.?</em></div>
+  <div class="line" id="l2" style="top:840px">Let your breath<br><em>slow the night down.</em></div>
+
+  <div class="ui" id="uiTop" style="top:250px">
+    <div class="eyebrow">Tonight · Wind down</div>
+  </div>
+  <div class="phase" id="phIn">Breathe in</div>
+  <div class="phase" id="phHold">Hold</div>
+  <div class="phase" id="phOut">Breathe out</div>
+  <div class="ui" id="uiBottom" style="top:1480px">
+    <div class="clock" id="clock">10:00</div>
+    <div class="hint" style="margin-top:14px">Guided breathing</div>
+  </div>
+
+  <div class="line" id="end" style="top:1080px; font-size:104px">Rest starts <em>here.</em></div>
+</div>
+
+<script>
+const W = 1080, H = 1920, DURATION = 15;
+const $ = id => document.getElementById(id);
+
+// ---------- helpers ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const ease = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;   // cubic in-out
+const easeOut = x => 1 - Math.pow(1 - x, 3);
+const sine = x => -(Math.cos(Math.PI * x) - 1) / 2;
+// fade in over [a,b], out over [c,d]
+const window4 = (t, a, b, c, d) => Math.min(easeOut(prog(t, a, b)), 1 - ease(prog(t, c, d)));
+
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ---------- static assets (seeded, deterministic) ----------
+const rand = mulberry32(7);
+const motes = Array.from({ length: 46 }, () => ({
+  x: rand() * W, y: rand() * H, r: 1.2 + rand() * 2.6,
+  vy: 6 + rand() * 14, sway: 8 + rand() * 18, ph: rand() * Math.PI * 2, a: 0.15 + rand() * 0.45,
+}));
+const grain = document.createElement("canvas");
+grain.width = W; grain.height = H;
+{
+  const g = grain.getContext("2d"), img = g.createImageData(W, H), r = mulberry32(3);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = r() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 10;
+  }
+  g.putImageData(img, 0, 0);
+}
+
+// ---------- breathing schedule ----------
+const T = {
+  inhale: [5.0, 8.5], hold: [8.5, 9.3], exhale: [9.3, 12.3],
+};
+// breath amount 0 (empty) .. 1 (full)
+function breath(t) {
+  if (t < T.inhale[0]) return 0;
+  if (t < T.inhale[1]) return sine(prog(t, ...T.inhale));
+  if (t < T.hold[1]) return 1;
+  return 1 - sine(prog(t, ...T.exhale));
+}
+
+// ---------- render ----------
+const bg = $("bg").getContext("2d");
+const tm = $("timer").getContext("2d");
+
+function drawBackground(t) {
+  const b = breath(t);
+  const endBloom = ease(prog(t, 12.0, 14.2));
+  // base vertical wash
+  const lin = bg.createLinearGradient(0, 0, 0, H);
+  lin.addColorStop(0, "#110f19");
+  lin.addColorStop(0.55, "#1b1624");
+  lin.addColorStop(1, "#2a1d27");
+  bg.fillStyle = lin; bg.fillRect(0, 0, W, H);
+
+  // warm horizon glow that slowly rises, breathes with the timer
+  const gy = lerp(2150, 1650, ease(prog(t, 0, 15))) - endBloom * 120;
+  const gr = 1150 + b * 120 + endBloom * 180;
+  const glow = bg.createRadialGradient(W / 2, gy, 0, W / 2, gy, gr);
+  const ga = 0.30 + b * 0.10 + endBloom * 0.08;
+  glow.addColorStop(0, `rgba(242,170,120,${ga})`);
+  glow.addColorStop(0.45, `rgba(200,120,110,${ga * 0.35})`);
+  glow.addColorStop(1, "rgba(40,25,40,0)");
+  bg.fillStyle = glow; bg.fillRect(0, 0, W, H);
+
+  // drifting dust motes, like light in a dark room
+  for (const m of motes) {
+    const y = ((m.y - m.vy * t) % H + H) % H;
+    const x = m.x + Math.sin(m.ph + t * 0.35) * m.sway;
+    const tw = 0.6 + 0.4 * Math.sin(m.ph * 3 + t * 0.9);
+    bg.fillStyle = `rgba(250,220,190,${m.a * tw * clamp(t / 1.5)})`;
+    bg.beginPath(); bg.arc(x, y, m.r, 0, Math.PI * 2); bg.fill();
+  }
+
+  // opening fade from black
+  const fadeIn = 1 - easeOut(prog(t, 0, 1.0));
+  if (fadeIn > 0) { bg.fillStyle = `rgba(0,0,0,${fadeIn})`; bg.fillRect(0, 0, W, H); }
+
+  bg.drawImage(grain, 0, 0);
+}
+
+function drawTimer(t) {
+  tm.clearRect(0, 0, W, H);
+  const show = window4(t, 4.5, 5.3, 11.9, 12.9);
+  if (show <= 0) return;
+  const cx = W / 2, cy = 960, b = breath(t);
+  tm.save();
+  tm.globalAlpha = show;
+
+  // soft halo
+  const R = lerp(170, 300, b);
+  const halo = tm.createRadialGradient(cx, cy, R * 0.2, cx, cy, R * 1.9);
+  halo.addColorStop(0, `rgba(245,178,126,${0.20 + b * 0.12})`);
+  halo.addColorStop(1, "rgba(245,178,126,0)");
+  tm.fillStyle = halo; tm.beginPath(); tm.arc(cx, cy, R * 1.9, 0, Math.PI * 2); tm.fill();
+
+  // breathing orb
+  const orb = tm.createRadialGradient(cx, cy - R * 0.25, R * 0.1, cx, cy, R);
+  orb.addColorStop(0, "rgba(250,214,176,0.34)");
+  orb.addColorStop(0.7, "rgba(232,150,112,0.20)");
+  orb.addColorStop(1, "rgba(232,150,112,0.08)");
+  tm.fillStyle = orb; tm.beginPath(); tm.arc(cx, cy, R, 0, Math.PI * 2); tm.fill();
+  tm.strokeStyle = "rgba(250,222,196,0.35)"; tm.lineWidth = 2;
+  tm.beginPath(); tm.arc(cx, cy, R, 0, Math.PI * 2); tm.stroke();
+
+  // outer track + phase progress arc
+  const ringR = 360;
+  const draw = easeOut(prog(t, 4.6, 5.5));
+  tm.lineCap = "round";
+  tm.strokeStyle = "rgba(245,234,221,0.14)"; tm.lineWidth = 4;
+  tm.beginPath(); tm.arc(cx, cy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * draw); tm.stroke();
+
+  let p = 0;
+  if (t >= T.inhale[0] && t < T.inhale[1]) p = prog(t, ...T.inhale);
+  else if (t >= T.hold[0] && t < T.hold[1]) p = prog(t, ...T.hold);
+  else if (t >= T.exhale[0]) p = prog(t, ...T.exhale);
+  if (t >= T.inhale[0] && p > 0) {
+    tm.strokeStyle = "rgba(246,190,140,0.95)"; tm.lineWidth = 6;
+    tm.shadowColor = "rgba(246,180,120,0.8)"; tm.shadowBlur = 18;
+    tm.beginPath(); tm.arc(cx, cy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p); tm.stroke();
+    // leading dot
+    const a = -Math.PI / 2 + Math.PI * 2 * p;
+    tm.fillStyle = "rgba(255,226,196,1)";
+    tm.beginPath(); tm.arc(cx + Math.cos(a) * ringR, cy + Math.sin(a) * ringR, 9, 0, Math.PI * 2); tm.fill();
+  }
+  tm.restore();
+}
+
+function setLine(el, o, t0) {
+  el.style.opacity = o;
+  const k = 1 - o;
+  el.style.transform = `translateY(${k * 18}px)`;
+  el.style.filter = `blur(${k * 8}px)`;
+}
+
+function render(t) {
+  t = clamp(t, 0, DURATION);
+  drawBackground(t);
+  drawTimer(t);
+
+  setLine($("l1"), window4(t, 0.6, 1.8, 2.4, 3.0));
+  setLine($("l2"), window4(t, 2.9, 3.7, 4.0, 4.5));
+
+  const ui = window4(t, 4.6, 5.4, 11.9, 12.7);
+  $("uiTop").style.opacity = ui;
+  $("uiBottom").style.opacity = ui;
+
+  const ph = (a, b) => window4(t, a, a + 0.45, b - 0.35, b) * ui;
+  $("phIn").style.opacity = ph(T.inhale[0] - 0.1, T.inhale[1] + 0.05);
+  $("phHold").style.opacity = ph(T.hold[0], T.hold[1] + 0.05);
+  $("phOut").style.opacity = ph(T.exhale[0], T.exhale[1] + 0.3);
+
+  // session countdown: real seconds from when the timer starts
+  const elapsed = Math.max(0, Math.floor(t - T.inhale[0]));
+  const left = 600 - elapsed;
+  $("clock").textContent = `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(left % 60).padStart(2, "0")}`;
+
+  // closing line: arrives slowly, then settles
+  const e = easeOut(prog(t, 12.6, 14.0));
+  const end = $("end");
+  end.style.opacity = e;
+  end.style.transform = `translateY(${(1 - e) * 22}px)`;
+  end.style.filter = `blur(${(1 - e) * 10}px)`;
+}
+
+window.__DURATION = DURATION;
+window.render = render;
+window.__ready = document.fonts.ready.then(() => render(0));
+
+// Live preview when opened directly in a browser (?still disables playback)
+if (!new URLSearchParams(location.search).has("still")) {
+  window.__ready.then(() => {
+    const start = performance.now();
+    const tick = now => { render(((now - start) / 1000) % DURATION); requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
+}
+</script>
+</body>
+</html>

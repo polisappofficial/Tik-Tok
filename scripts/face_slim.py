@@ -5,7 +5,7 @@ import sys, subprocess, numpy as np, cv2, av
 import mediapipe as mp
 from mediapipe.tasks.python import vision, BaseOptions
 
-CHEEK, JAW, CHIN = 0.0, 0.0, 0.055   # fraction of face size; cheeks/jaw off, double-chin lift only
+CHEEK, JAW, CHIN = 0.0, 0.0, 0.0     # all face reshaping off by request (kept for reference)
 # mediapipe face-mesh contour indices (image-left side, image-right side)
 CHEEK_L, CHEEK_R = [93, 132, 58], [323, 361, 288]
 JAW_L, JAW_R = [172, 136, 150], [397, 365, 379]

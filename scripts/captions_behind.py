@@ -1,4 +1,4 @@
-"""Final pass: double-chin touch-up + emphasis captions (white, red offset shadow)
+"""Final pass: emphasis captions (white, red offset shadow)
 composited BEHIND the speaker. Each word appears on the frame it is spoken.
 Usage: captions_behind.py base.mp4 base.segments.json out.mp4 face_model.task seg_model.tflite [--frames a,b]"""
 import sys, json, re, subprocess, numpy as np, cv2, av
@@ -6,7 +6,8 @@ import mediapipe as mp
 from mediapipe.tasks.python import vision, BaseOptions
 from PIL import Image, ImageDraw, ImageFont
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from face_slim import warp, face_moves, make_landmarker
+from face_slim import warp, face_moves, make_landmarker, CHEEK, JAW, CHIN
+RESHAPE = any((CHEEK, JAW, CHIN))   # face reshaping is off unless a strength is set in face_slim.py
 
 src, segf, dst, face_model, seg_model = sys.argv[1:6]
 only = [int(x) for x in sys.argv[7].split(",")] if len(sys.argv) > 7 else None
@@ -99,7 +100,7 @@ for i, b in enumerate(blocks):
 seg = vision.ImageSegmenter.create_from_options(vision.ImageSegmenterOptions(
     base_options=BaseOptions(model_asset_path=seg_model), running_mode=vision.RunningMode.VIDEO,
     output_confidence_masks=True))
-lm = make_landmarker(face_model)
+lm = make_landmarker(face_model) if RESHAPE else None
 
 def choose_top(b, person):
     """Sit the block just behind the head: as low as possible while <=12% of its ink is hidden."""
@@ -124,8 +125,8 @@ for i, fr in enumerate(inp.decode(video=0)):
     img = fr.to_ndarray(format="rgb24")
     mpimg = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(img))
     ts = int(i * 1001 / 30)
-    res = lm.detect_for_video(mpimg, ts)
-    if res.face_landmarks:
+    res = lm.detect_for_video(mpimg, ts) if lm else None
+    if res and res.face_landmarks:
         P = np.array([[p.x * W, p.y * H] for p in res.face_landmarks[0]], np.float32)
         fw = np.linalg.norm(P[234] - P[454])
         if prevP is not None and np.abs(P - prevP).max() < 0.08 * fw: P = 0.55 * P + 0.45 * prevP

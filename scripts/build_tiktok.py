@@ -5,19 +5,20 @@ S = "/root/.claude/uploads/702fee8f-3cbe-5239-af99-f1b2098d7a56/"
 OUT = sys.argv[1]
 FR = 1001 / 30000
 q = lambda x: round(x / FR) * FR
-PRE, POST = 0.06, 0.09      # padding kept before/after speech
+PRE, POST = 0.05, 0.06      # padding kept before/after speech
 D = 0.30                     # transition length (video overlap, centred on the audio cut)
 EXT = D / 2
 PUNCH, TZ = 1.12, 0.10       # jump-cut punch-in, extra zoom during transitions
+BIGCUT = 0.27                # pauses at least this long flip the punch-in; shorter breath cuts keep framing
 clips = [  # file, speech islands (pauses <0.25s kept), grade, gain
     ("c1cd4e31-Adobe_Express_-_IMG_6284-2.mp4",
-     [(2.227, 3.720), (4.100, 5.136), (5.780, 7.640), (7.969, 11.027), (11.541, 12.068)], None, 0),
-    ("fad40645-Adobe_Express_-_IMG_6289.mp4", [(1.060, 1.290), (2.068, 7.382), (7.803, 10.657)],
+     [(2.227, 3.720), (4.100, 5.136), (5.780, 6.277), (6.462, 7.640), (7.969, 11.027), (11.541, 12.068)], None, 0),
+    ("fad40645-Adobe_Express_-_IMG_6289.mp4", [(2.068, 3.710), (3.990, 6.520), (6.710, 7.382), (7.803, 10.657)],
      "eq=saturation=0.82:contrast=1.07:brightness=-0.012:gamma=0.98,lutyuv=u=val+0.3:v=val+2", -1.7),
     ("1e66f8dc-Adobe_Express_-_IMG_6292.mp4", [(2.280, 6.619), (7.042, 8.830)],
      "eq=saturation=0.64:contrast=1.07:brightness=-0.015:gamma=0.98,lutyuv=u=val-4:v=val+4", -0.3),
     ("5c3a5051-Adobe_Express_-_IMG_6299.mp4",
-     [(1.982, 3.204), (3.508, 6.430), (6.723, 8.594), (8.890, 11.297)],
+     [(1.982, 3.204), (3.508, 6.050), (6.230, 6.430), (6.723, 8.594), (8.890, 11.297)],
      "eq=saturation=0.92:contrast=1.05:brightness=-0.008:gamma=0.98,lutyuv=u=val+2.5:v=val+2.5", -1.3),
     ("d0e8cbfe-Adobe_Express_-_IMG_6301.mp4", [(2.637, 6.276), (6.556, 9.046)],
      "eq=saturation=0.70:contrast=1.09:brightness=0.012:gamma=0.97,lutyuv=u=val+1:v=val+2.5", -1.7),
@@ -34,12 +35,16 @@ t_audio = 0.0
 for ci, (f, speech, grade, gain) in enumerate(clips):
     vs, as_ = [], []
     n = len(speech)
+    zi, prev_e = 0, None
     for si, (s, e) in enumerate(speech):
         a, b = q(s - PRE), q(e + POST)
         va, vb = a, b
         if si == 0 and ci > 0: va = q(a - EXT)
         if si == n - 1 and ci < len(clips) - 1: vb = q(b + EXT)
-        base = PUNCH if si % 2 else 1.0
+        if prev_e is not None and s - e_prev_speech >= BIGCUT: zi += 1
+        e_prev_speech = e
+        prev_e = e
+        base = PUNCH if zi % 2 else 1.0
         L = vb - va
         z = f"{base}"
         if si == n - 1 and ci < len(clips) - 1:   # ease into zoom while dissolving out

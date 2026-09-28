@@ -19,8 +19,10 @@ FPS = 30000 / 1001
 LEAD = 0.033            # show a word one frame before its acoustic onset so it never feels late
 WHITE, RED = (255, 255, 255), (228, 30, 42)
 BASE, HERO, MAXW = 118, 190, 960
+MEGA, MEGA_MAXW = 420, 1040   # "**" lines: one word filling the top of the frame
 
-# Emphasis phrases per clip, in spoken order. Lines separated by "|", "*" marks the hero line.
+# Emphasis phrases per clip, in spoken order. Lines separated by "|", "*" marks the hero line,
+# "**" a full-width mega line.
 # Each display token is timed to the next matching spoken word (words may be skipped).
 PHRASES = {
  "c1cd4e31-Adobe_Express_-_IMG_6284-2.mp4": ["*CANADA", "BEAUTIFUL|*COUNTRY", "AMAZING|*COMMUNITY",
@@ -29,7 +31,7 @@ PHRASES = {
      "*NO ONE", "EVERY|*FOUR YEARS"],
  "1e66f8dc-Adobe_Express_-_IMG_6292.mp4": ["*BETTER WAYS", "*PROTESTING", "PRIVATE|*EMAILS", "*POLITICIANS",
      "VOICE OUR|*OPINIONS"],
- "5c3a5051-Adobe_Express_-_IMG_6299.mp4": ["*POLIS", "BUILDING|*AN APP", "CANADIANS|*VOTE", "*SUPPORT", "OR|*OPPOSE",
+ "5c3a5051-Adobe_Express_-_IMG_6299.mp4": ["**POLIS", "BUILDING|*AN APP", "CANADIANS|*VOTE", "*SUPPORT", "OR|*OPPOSE",
      "REAL|*BILLS", "*RIGHT NOW", "EXACTLY|*HOW WE FEEL"],
  "d0e8cbfe-Adobe_Express_-_IMG_6301.mp4": ["*INTERESTED?", "JOIN OUR|*WAITLIST", "LINK IN|*BIO", "BE THE|*FIRST"],
 }
@@ -64,7 +66,7 @@ for clip, plist in PHRASES.items():
     for spec in plist:
         lines = []
         for line in spec.split("|"):
-            hero = line.startswith("*"); line = line.lstrip("*")
+            hero = 2 if line.startswith("**") else 1 if line.startswith("*") else 0; line = line.lstrip("*")
             toks = []
             for tok in line.split(" "):
                 key = ALIAS.get(re.sub(r"[^a-z']", "", tok.lower()), re.sub(r"[^a-z']", "", tok.lower()))
@@ -78,12 +80,12 @@ blocks = []
 for lines in phrases:
     items, y = [], 0
     for toks, hero in lines:
-        sz = HERO if hero else BASE
+        sz = (BASE, HERO, MEGA)[hero]; maxw = MEGA_MAXW if hero == 2 else MAXW
         while True:
             rend = [render_token(t[0], sz) for t in toks]
             space = sz * 0.33
             wtot = sum(r[1] for r in rend) + space * (len(rend) - 1)
-            if wtot <= MAXW or sz < 60: break
+            if wtot <= maxw or sz < 60: break
             sz = int(sz * 0.93)
         x = (1080 - wtot) / 2
         for (tok, t0, t1), (img, w, h) in zip(toks, rend):
@@ -91,7 +93,8 @@ for lines in phrases:
             x += w + space
         y += sz * 0.98
     start = min(i["t0"] for i in items)
-    blocks.append({"items": items, "h": y, "start": start, "last_end": max(t[2] for l in lines for t in l[0])})
+    blocks.append({"items": items, "h": y, "start": start, "last_end": max(t[2] for l in lines for t in l[0]),
+                   "mega": any(h == 2 for _, h in lines)})
 for i, b in enumerate(blocks):
     nxt = blocks[i + 1]["start"] if i + 1 < len(blocks) else 1e9
     b["end"] = min(nxt - 0.001, b["last_end"] + 0.55)
@@ -103,16 +106,18 @@ seg = vision.ImageSegmenter.create_from_options(vision.ImageSegmenterOptions(
 lm = make_landmarker(face_model) if RESHAPE else None
 
 def choose_top(b, person):
-    """Sit the block just behind the head: as low as possible while <=12% of its ink is hidden."""
-    for top in range(430, 159, -30):
+    """Sit the block just behind the head: as low as possible while <=12% of its ink is hidden
+    (mega words may tuck up to 25% behind the head, since their letters stay readable)."""
+    tops, limit = (range(330, 89, -20), 0.25) if b["mega"] else (range(430, 159, -30), 0.12)
+    for top in tops:
         cov, tot = 0.0, 0.0
         for it in b["items"]:
             a = it["img"][..., 3] > 0; h, w = a.shape
             y0, x0 = int(top + it["y"]), int(it["x"])
             m = person[y0:y0 + h, x0:x0 + w]
             cov += (m[:a.shape[0], :a.shape[1]] * a[:m.shape[0], :m.shape[1]]).sum(); tot += a.sum()
-        if cov / tot <= 0.12: return top, False
-    return 190, True      # head fills the top of frame (punch-in): keep text readable in front
+        if cov / tot <= limit: return top, False
+    return (110 if b["mega"] else 190), True      # head fills the top of frame (punch-in): keep text readable in front
 
 inp = av.open(src); W, H = 1080, 1920
 enc = None if only else subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",

@@ -12,7 +12,7 @@ PUNCH, TZ = 1.12, 0.10       # jump-cut punch-in, extra zoom during transitions
 clips = [  # file, speech islands (pauses <0.25s kept), grade, gain
     ("c1cd4e31-Adobe_Express_-_IMG_6284-2.mp4",
      [(2.227, 3.720), (4.100, 5.136), (5.780, 7.640), (7.969, 11.027), (11.541, 12.068)], None, 0),
-    ("fad40645-Adobe_Express_-_IMG_6289.mp4", [(2.068, 7.382), (7.803, 10.657)],
+    ("fad40645-Adobe_Express_-_IMG_6289.mp4", [(1.060, 1.290), (2.068, 7.382), (7.803, 10.657)],
      "eq=saturation=0.82:contrast=1.07:brightness=-0.012:gamma=0.98,lutyuv=u=val+0.3:v=val+2", -1.7),
     ("1e66f8dc-Adobe_Express_-_IMG_6292.mp4", [(2.280, 6.619), (7.042, 8.830)],
      "eq=saturation=0.64:contrast=1.07:brightness=-0.015:gamma=0.98,lutyuv=u=val-4:v=val+4", -0.3),
@@ -29,6 +29,7 @@ def zoomv(expr):
             f"crop=1080:1920:x='(iw-1080)*0.5':y='(ih-1920)*0.33',setsar=1")
 
 fc, cut_times, clip_len = [], [], []
+segmap = []  # (clip file, src_start, src_end, out_start)
 t_audio = 0.0
 for ci, (f, speech, grade, gain) in enumerate(clips):
     vs, as_ = [], []
@@ -54,6 +55,7 @@ for ci, (f, speech, grade, gain) in enumerate(clips):
         fc.append(f"[{ci}:a]atrim={a:.4f}:{b:.4f},asetpts=PTS-STARTPTS,volume={gain}dB,"
                   f"afade=t=in:d=0.012,afade=t=out:st={b - a - 0.015:.4f}:d=0.015[a{k}]")
         vs.append(f"[v{k}]"); as_.append(f"[a{k}]")
+        segmap.append((f, a, b, t_audio))
         t_audio += b - a
     fc.append("".join(vs) + f"concat=n={n}:v=1:a=0,fps=30000/1001[cv{ci}]")
     fc.append("".join(as_) + f"concat=n={n}:v=0:a=1[ca{ci}]")
@@ -82,4 +84,6 @@ cmd = ["ffmpeg", "-v", "error", "-y"] + sum([["-i", S + c[0]] for c in clips], [
     "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", OUT]
 print("cuts at", [round(t, 3) for t in cut_times[:-1]], "total", round(t_audio, 3))
+import json, os
+json.dump(segmap, open(os.path.splitext(OUT)[0] + ".segments.json", "w"), indent=1)
 subprocess.run(cmd, check=True)

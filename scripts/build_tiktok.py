@@ -19,6 +19,8 @@ clips = [  # file, speech islands (pauses <0.25s kept), grade, gain
     ("5c3a5051-Adobe_Express_-_IMG_6299.mp4",
      [(1.982, 3.204), (3.508, 6.430), (6.723, 8.594), (8.890, 11.297)],
      "eq=saturation=0.92:contrast=1.05:brightness=-0.008:gamma=0.98,lutyuv=u=val+2.5:v=val+2.5", -1.3),
+    ("d0e8cbfe-Adobe_Express_-_IMG_6301.mp4", [(2.637, 6.276), (6.556, 9.046)],
+     "eq=saturation=0.70:contrast=1.09:brightness=0.012:gamma=0.97,lutyuv=u=val+1:v=val+2.5", -1.7),
 ]
 ease = "(3*pow({x},2)-2*pow({x},3))"   # smoothstep
 
